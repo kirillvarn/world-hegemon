@@ -8,7 +8,7 @@ pub struct Country {
   pub name: String,
   pub data: CountryData
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct CountryData {
   pub influence: f32
 }

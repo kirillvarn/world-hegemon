@@ -1,4 +1,10 @@
-use macroquad::{prelude::*, ui::{hash, root_ui, widgets::{self, Group, Window}}};
+use macroquad::{
+    prelude::*,
+    ui::{
+        hash, root_ui,
+        widgets::{self},
+    },
+};
 
 mod country;
 use country::Country;
@@ -7,15 +13,15 @@ use crate::country::CountryData;
 
 const SCALE_FACTOR: f32 = 0.5;
 
-#[derive(Default)]
-struct State {
-    info_panel: InfoPanel
+struct State<'a> {
+    info_panel: InfoPanel<'a>,
 }
 
 #[derive(Default)]
-struct InfoPanel {
+struct InfoPanel<'a> {
     opened: bool,
-    name: String
+    name: String,
+    data: Option<&'a CountryData>,
 }
 
 pub struct Asset {
@@ -31,7 +37,7 @@ fn window_conf() -> Conf {
         window_width: 1024,
         window_height: 576,
         platform: miniquad::conf::Platform {
-            swap_interval: Some(1),
+            swap_interval: Some(0),
             ..Default::default()
         },
         ..Default::default()
@@ -65,7 +71,14 @@ fn scale_image_bytes(src: &[u8], width: usize, height: usize) -> Vec<u8> {
     dst
 }
 
-fn is_colliding(image: &Image, mouse_pos: Vec2, tex_pos: Vec2) -> bool {
+fn is_colliding(width: f32, height: f32, mouse_pos: Vec2, element_pos: Vec2) -> bool {
+    return mouse_pos.x > element_pos.x
+        && mouse_pos.x < element_pos.x + width
+        && mouse_pos.y > element_pos.y
+        && mouse_pos.y < element_pos.y + height;
+}
+
+fn is_colliding_image(image: &Image, mouse_pos: Vec2, tex_pos: Vec2) -> bool {
     let local_x = mouse_pos.x - tex_pos.x;
     let local_y = mouse_pos.y - tex_pos.y;
 
@@ -84,9 +97,10 @@ fn is_colliding(image: &Image, mouse_pos: Vec2, tex_pos: Vec2) -> bool {
     return px[3] > 0;
 }
 
-fn emit_event(country_el: &Country, state: &mut State) {
+fn emit_event<'a>(country_el: &'a Country, state: &mut State<'a>) {
     if is_mouse_button_pressed(MouseButton::Left) {
         state.info_panel.name = country_el.name.clone();
+        state.info_panel.data = Some(&country_el.data);
         state.info_panel.opened = true;
     }
 }
@@ -126,19 +140,27 @@ async fn create_country(name: &str, position: Vec2, path: &str) -> Country {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let mut state: State = State{ info_panel: InfoPanel::default() };
+    let mut state: State = State {
+        info_panel: InfoPanel::default(),
+    };
 
-    let europe    = create_country("Europe", Vec2 { x: 344., y: 48.  }, "assets/EU.png").await;
-    let africa    = create_country("Africa", Vec2 { x: 415., y: 185. }, "assets/AF.png").await;
-    let asia      = create_country("Asia", Vec2 { x: 520., y: 50.  }, "assets/AS.png").await;
-    let n_america = create_country("North America", Vec2 { x: 80.,  y: 50.  }, "assets/NA.png").await;
-    let s_america = create_country("South America", Vec2 { x: 203., y: 277. }, "assets/SA.png").await;
+    let europe = create_country("Europe", Vec2 { x: 344., y: 48. }, "assets/EU.png").await;
+    let africa = create_country("Africa", Vec2 { x: 415., y: 185. }, "assets/AF.png").await;
+    let asia = create_country("Asia", Vec2 { x: 520., y: 50. }, "assets/AS.png").await;
+    let n_america = create_country("North America", Vec2 { x: 80., y: 50. }, "assets/NA.png").await;
+    let s_america =
+        create_country("South America", Vec2 { x: 203., y: 277. }, "assets/SA.png").await;
     let australia = create_country("Australia", Vec2 { x: 850., y: 320. }, "assets/AU.png").await;
 
     let countries: [Country; 6] = [europe, africa, asia, n_america, s_america, australia];
 
+    let info_panel_pos = vec2(10., 370.);
+    let info_panel_size = vec2(320., 200.);
+
+    let mut info_panel_colliding = false;
+
     loop {
-        clear_background(LIGHTGRAY);
+        clear_background(WHITE);
         draw_fps();
 
         let (mouse_x, mouse_y) = mouse_position();
@@ -149,25 +171,39 @@ async fn main() {
         };
 
         if state.info_panel.opened {
-            widgets::Window::new(hash!(), vec2(400., 200.), vec2(320., 400.))
-                .label("Info")
+            widgets::Window::new(hash!(), info_panel_pos, info_panel_size)
+                .movable(false)
+                .titlebar(false)
                 .ui(&mut *root_ui(), |ui| {
-                    ui.label(Vec2::new(200., 58.), &state.info_panel.name);
-            });
+                    ui.label(Vec2::new(10., 10.), &state.info_panel.name);
+                    ui.label(
+                        Vec2::new(10., 30.),
+                        &format!("Influence: {}", state.info_panel.data.unwrap().influence),
+                    );
+
+                    if ui.button(vec2(307., 0.), "x") {
+                        state.info_panel.opened = false;
+                    }
+                });
+
+            info_panel_colliding = is_colliding(
+                info_panel_size.x,
+                info_panel_size.y,
+                mouse_pos,
+                info_panel_pos,
+            );
+        } else {
+            info_panel_colliding = false;
         }
 
         for country_el in &countries {
             let asset = &country_el.asset;
 
-            let collision = is_colliding(
-                &asset.image,
-                mouse_pos,
-                country_el.position,
-            );
+            let collision = is_colliding_image(&asset.image, mouse_pos, country_el.position);
 
             let mut col = asset.color;
 
-            if collision {
+            if collision && !info_panel_colliding {
                 emit_event(&country_el, &mut state);
                 col = BLUE;
             }
@@ -187,4 +223,3 @@ async fn main() {
         next_frame().await
     }
 }
-
